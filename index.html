@@ -3,41 +3,255 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>网页节拍器 (Canvas版)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>网页节拍器</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
+        /* --- CSS 变量和基础样式 --- */
+        :root {
+            --bg-color: #e0e5ec;
+            --shadow-light: #ffffff;
+            --shadow-dark: #a3b1c6;
+            --primary-color-start: #6dd5ed;
+            --primary-color-end: #2193b0;
+            --active-color-light: #a8e063; /* 绿色系活动色，用于光晕亮部 */
+            --active-color-dark: #56ab2f;  /* 绿色系活动色，用于光晕暗部 */
+            --neumorphic-radius: 20px;
+            --control-size: 220px; /* 中心圆盘尺寸 */
+        }
+
         body {
+            background-color: var(--bg-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
             font-family: 'Inter', sans-serif;
+            color: #555;
+            overflow: hidden;
         }
-        /* 自定义输入框的箭头按钮样式 */
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button {
+
+        /* --- 主容器和布局 --- */
+        .metronome-container {
+            display: grid;
+            grid-template-areas:
+                "bpm-control . volume-slider-container"
+                "circular-control-area circular-control-area volume-slider-container"
+                "bottom-icons . volume-slider-container";
+            grid-template-columns: 1fr auto 1fr;
+            grid-template-rows: auto 1fr auto;
+            gap: 25px 15px;
+            align-items: center;
+            justify-items: center;
+            width: 100%;
+            max-width: 380px;
+            padding: 30px;
+            background-color: var(--bg-color);
+            border-radius: var(--neumorphic-radius);
+            box-shadow: 10px 10px 20px var(--shadow-dark),
+                       -10px -10px 20px var(--shadow-light);
+        }
+        
+        /* --- BPM 控制 --- */
+        .bpm-control {
+            grid-area: bpm-control;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            grid-column: 1 / -1; /* 让BPM控制横跨所有列 */
+            grid-area: bpm-control;
+        }
+
+        .bpm-button {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background-color: var(--bg-color);
+            box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+            border: none;
+            font-size: 24px;
+            font-weight: bold;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .bpm-button:active {
+            box-shadow: inset 2px 2px 5px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
+            color: var(--primary-color-end);
+        }
+
+        .bpm-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #333;
+            width: 110px;
+            text-align: center;
+        }
+
+        /* --- 中心圆形控制区域 --- */
+        .circular-control-area {
+            grid-area: circular-control-area;
+            position: relative;
+            width: var(--control-size);
+            height: var(--control-size);
+            border-radius: 50%;
+            background-color: var(--bg-color);
+            box-shadow: inset 10px 10px 20px var(--shadow-dark), inset -10px -10px 20px var(--shadow-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #metronome-canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            transform: scale(0.9); /* 调整 Canvas 缩放，使其填充整个圆环内部 */
+        }
+
+        .play-pause-button {
+            position: relative;
+            z-index: 10;
+            width: calc(var(--control-size) * 0.45);
+            height: calc(var(--control-size) * 0.45);
+            border-radius: 50%;
+            background-color: var(--bg-color);
+            box-shadow: 7px 7px 15px var(--shadow-dark), -7px -7px 15px var(--shadow-light);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease-in-out;
+            color: #666;
+        }
+        .play-pause-button:active {
+            box-shadow: inset 4px 4px 10px var(--shadow-dark), inset -4px -4px 10px var(--shadow-light);
+            color: var(--primary-color-end);
+        }
+        .play-pause-button svg {
+            width: 50%;
+            height: 50%;
+        }
+        #play-icon {
+            transform: translateX(10%);
+        }
+        
+        /* --- 底部图标 --- */
+        .bottom-icons {
+            grid-area: bottom-icons;
+            display: flex;
+            justify-content: space-around;
+            gap: 30px;
+            grid-column: 1 / span 2;
+        }
+        .icon-button {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: var(--bg-color);
+            box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease-in-out;
+            color: #888;
+        }
+        .icon-button:active {
+            box-shadow: inset 2px 2px 5px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
+        }
+        .icon-button svg {
+            width: 50%;
+            height: 50%;
+        }
+
+        /* --- 音量滑块 --- */
+        .volume-slider-container {
+            grid-area: volume-slider-container;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 50px;
+        }
+
+        input[type="range"][orient="vertical"] {
             -webkit-appearance: none;
-            margin: 0;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+            width: 200px;
+            transform: rotate(-90deg); /* 旋转滑块使其垂直 */
         }
-        input[type=number] {
-            -moz-appearance: textfield;
+        
+        /* Chrome, Safari, Opera, Edge */
+        input[type="range"][orient="vertical"]::-webkit-slider-runnable-track {
+            height: 10px;
+            background: var(--bg-color);
+            border-radius: 5px;
+            box-shadow: inset 2px 2px 5px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
+        }
+        input[type="range"][orient="vertical"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            margin-top: -7px; /* 垂直居中 */
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            box-shadow: 3px 3px 8px var(--shadow-dark), -3px -3px 8px var(--shadow-light);
+        }
+
+        /* Firefox */
+        input[type="range"][orient="vertical"]::-moz-range-track {
+            height: 10px;
+            background: var(--bg-color);
+            border-radius: 5px;
+            box-shadow: inset 2px 2px 5px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
+        }
+        input[type="range"][orient="vertical"]::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            box-shadow: 3px 3px 8px var(--shadow-dark), -3px -3px 8px var(--shadow-light);
+            border: none;
         }
     </style>
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+<body>
 
-    <div class="w-full max-w-2xl text-center">
-        <h1 class="text-4xl font-bold text-gray-800 mb-4">Canvas 节拍器</h1>
-        <p class="text-gray-600 mb-8">设置每分钟节拍数 (BPM)，然后点击开始。</p>
-        
-        <!-- Canvas 元素 -->
-        <div class="bg-white rounded-lg shadow-lg mb-8 aspect-video overflow-hidden">
-            <canvas id="metronome-canvas"></canvas>
+    <div class="metronome-container">
+        <div class="bpm-control">
+            <button id="bpm-minus" class="bpm-button">-</button>
+            <span id="bpm-display" class="bpm-value">100</span>
+            <button id="bpm-plus" class="bpm-button">+</button>
         </div>
 
-        <!-- 控制区域 -->
-        <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col sm:flex-row items-center justify-center gap-4">
-            <label for="bpm-input" class="text-lg font-medium text-gray-700">频率 (BPM):</label>
-            <input type="number" id="bpm-input" value="100" min="1" max="300" class="w-24 text-center text-lg p-2 border-2 border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
-            <button id="start-btn" class="w-full sm:w-auto bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">开始</button>
-            <button id="stop-btn" class="w-full sm:w-auto bg-red-600 text-white font-bold py-2 px-6 rounded-md hover:bg-red-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">停止</button>
+        <div class="circular-control-area">
+            <canvas id="metronome-canvas"></canvas>
+            <button id="play-pause-btn" class="play-pause-button">
+                 <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path id="play-icon" d="M8 5v14l11-7z" />
+                    <path id="pause-icon" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" style="display:none;" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="bottom-icons">
+            <button class="icon-button">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.2,5.77C8.61,6.01,8.08,6.33,7.58,6.71L5.19,5.75C4.97,5.68,4.72,5.75,4.6,5.97L2.68,9.29 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.7,4.76,12,4.76,12.3c0,0.3,0.02,0.6,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48-0.41l0.36-2.54c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.11-0.2,0.06-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"></path></svg>
+            </button>
+            <button class="icon-button">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12,3v10.55C11.41,13.21,10.73,13,10,13c-2.21,0-4,1.79-4,4s1.79,4,4,4s4-1.79,4-4V7h4V3H12z M10,19 c-1.1,0-2-0.9-2-2s0.9-2,2-2s2,0.9,2,2S11.1,19,10,19z"></path></svg>
+            </button>
+        </div>
+
+        <div class="volume-slider-container">
+            <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.5" orient="vertical">
         </div>
     </div>
 
@@ -46,59 +260,58 @@
         const canvas = document.getElementById('metronome-canvas');
         const ctx = canvas.getContext('2d');
 
-        const bpmInput = document.getElementById('bpm-input');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        
+        const bpmMinusBtn = document.getElementById('bpm-minus');
+        const bpmPlusBtn = document.getElementById('bpm-plus');
+        const bpmDisplay = document.getElementById('bpm-display');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const volumeSlider = document.getElementById('volume-slider');
+
         // --- 2. 状态变量 ---
-        let intervalId = null; // 用于存储定时器ID
-        let isRedFirst = true; // 跟踪颜色状态, true表示左红右蓝
-        const COLOR_1 = '#ef4444'; // 红色 (Tailwind red-500)
-        const COLOR_2 = '#3b82f6'; // 蓝色 (Tailwind blue-500)
+        let intervalId = null;
+        let isPlaying = false;
+        let currentBpm = 100;
+        let beatInMeasure = 0;
+        const BEATS_PER_MEASURE = 2; // 改为2拍循环
 
         // --- 2.5. 音频 ---
         let audioContext = null;
+        let masterGainNode = null;
 
-        // 初始化音频上下文（必须由用户操作触发）
         function initAudio() {
             if (!audioContext) {
-                // 兼容旧版浏览器
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                masterGainNode = audioContext.createGain();
+                masterGainNode.connect(audioContext.destination);
+                masterGainNode.gain.setValueAtTime(parseFloat(volumeSlider.value), audioContext.currentTime);
             }
-            // 如果音频上下文处于暂停状态（某些浏览器会自动暂停），则恢复它
             if (audioContext.state === 'suspended') {
                 audioContext.resume();
             }
         }
 
-        // 播放声音的函数
         function playSound(frequency = 880, duration = 0.1) {
-            if (!audioContext) return;
+            if (!audioContext || !masterGainNode) return;
             const now = audioContext.currentTime;
 
-            // 创建一个振荡器来生成声波
             const oscillator = audioContext.createOscillator();
-            oscillator.type = 'sine'; // 正弦波听起来比较柔和
+            oscillator.type = 'sine';
             oscillator.frequency.setValueAtTime(frequency, now);
 
-            // 创建一个增益节点来控制音量包络（实现“滴答”声）
             const gainNode = audioContext.createGain();
             gainNode.gain.setValueAtTime(0, now);
-            gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01); // 快速起音
-            gainNode.gain.linearRampToValueAtTime(0, now + duration); // 快速衰减
+            gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01);
+            gainNode.gain.linearRampToValueAtTime(0, now + duration);
 
-            // 连接节点: 振荡器 -> 增益 -> 输出设备 (扬声器)
             oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-
-            // 启动和停止振荡器，播放完后自动清理
+            gainNode.connect(masterGainNode);
+            
             oscillator.start(now);
             oscillator.stop(now + duration);
         }
-
-        // --- 3. Canvas 绘图函数 ---
         
-        // 调整Canvas尺寸以匹配其容器，并保持高清
+        // --- 3. Canvas 绘图函数 ---
         function resizeCanvas() {
             const parent = canvas.parentElement;
             const dpr = window.devicePixelRatio || 1;
@@ -106,114 +319,160 @@
             canvas.height = parent.clientHeight * dpr;
             canvas.style.width = `${parent.clientWidth}px`;
             canvas.style.height = `${parent.clientHeight}px`;
-            ctx.scale(dpr, dpr); // 缩放画布以适应高DPI屏幕
-            draw(); // 尺寸变化后重绘
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 调整大小时清空画布
+            // 重新绘制背景圆，确保调整大小后 Canvas 内容正确
+            drawTwoHalves(beatInMeasure); 
         }
         
-        // 核心绘图函数
-        function draw() {
-            // 获取当前的画布尺寸 (使用 style 的尺寸)
+        // 绘制填充圆环和光晕效果
+        function drawTwoHalves(beatIndex) {
             const width = canvas.clientWidth;
             const height = canvas.clientHeight;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const outerRadius = Math.min(width, height) / 2;
+            const innerRadius = outerRadius * 0.7; // 定义内圆半径，创建环形区域
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空画布
+
+            // 获取 CSS 变量中的颜色
+            const styles = getComputedStyle(document.documentElement);
+            const activeColorLight = styles.getPropertyValue('--active-color-light').trim();
+            const activeColorDark = styles.getPropertyValue('--active-color-dark').trim();
+            const bgColor = styles.getPropertyValue('--bg-color').trim();
+
+            // 根据 beatIndex 决定当前活动的颜色
+            const currentActiveColor = beatIndex === 0 ? activeColorLight : activeColorDark;
+            const inactiveColor = bgColor; // 非活动区域使用背景色
+
+            // --- 绘制左半部分 ---
+            ctx.save(); // 保存当前 Canvas 状态
             
-            // 清除整个画布
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // 计算方块的尺寸和位置
-            const boxSize = Math.min(width, height) * 0.4; // 方块尺寸为画布短边的40%
-            const gap = width * 0.05; // 间隙为画布宽度的5%
-            const totalWidth = boxSize * 2 + gap; // 两个方块加间隙的总宽度
-
-            const startX = (width - totalWidth) / 2; // 计算起始X坐标以使其居中
-            const startY = (height - boxSize) / 2; // 计算起始Y坐标以使其居中
-
-            // 根据 isRedFirst 状态决定颜色
-            const firstColor = isRedFirst ? COLOR_1 : COLOR_2;
-            const secondColor = isRedFirst ? COLOR_2 : COLOR_1;
-            
-            // 绘制第一个方块
-            ctx.fillStyle = firstColor;
+            // 绘制左侧背景圆 (非活动色)
             ctx.beginPath();
-            // 使用自定义的圆角矩形绘制函数
-            drawRoundedRect(startX, startY, boxSize, boxSize, 12);
-            ctx.fill();
-
-            // 绘制第二个方块
-            ctx.fillStyle = secondColor;
-            ctx.beginPath();
-            drawRoundedRect(startX + boxSize + gap, startY, boxSize, boxSize, 12);
-            ctx.fill();
-        }
-
-        // 辅助函数：绘制圆角矩形
-        function drawRoundedRect(x, y, width, height, radius) {
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + width - radius, y);
-            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-            ctx.lineTo(x + width, y + height - radius);
-            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-            ctx.lineTo(x + radius, y + height);
-            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.arc(centerX, centerY, outerRadius, Math.PI * 0.5, Math.PI * 1.5); // 从9点到3点
+            ctx.arc(centerX, centerY, innerRadius, Math.PI * 1.5, Math.PI * 0.5, true); // 从3点到9点，逆时针
             ctx.closePath();
+            ctx.fillStyle = (beatIndex === 1) ? currentActiveColor : inactiveColor; // 左侧是下一拍的颜色 (如果当前是0，下一拍是1)
+            ctx.fill();
+
+            // 绘制左侧活动光晕 (如果当前是活动的 beatIndex === 0)
+            if (beatIndex === 0) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, outerRadius, Math.PI * 0.5, Math.PI * 1.5);
+                ctx.arc(centerX, centerY, innerRadius, Math.PI * 1.5, Math.PI * 0.5, true);
+                ctx.closePath();
+                ctx.fillStyle = currentActiveColor;
+                ctx.filter = `blur(${outerRadius * 0.15}px)`; // 模糊效果
+                ctx.globalCompositeOperation = 'lighter'; // 叠加发光
+                ctx.fill();
+                ctx.filter = 'none'; // 重置 filter
+                ctx.globalCompositeOperation = 'source-over'; // 重置混合模式
+            }
+
+            ctx.restore(); // 恢复之前保存的 Canvas 状态
+
+            // --- 绘制右半部分 ---
+            ctx.save();
+            
+            // 绘制右侧背景圆 (非活动色)
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, outerRadius, -Math.PI * 0.5, Math.PI * 0.5); // 从3点到9点
+            ctx.arc(centerX, centerY, innerRadius, Math.PI * 0.5, -Math.PI * 0.5, true); // 从9点到3点，逆时针
+            ctx.closePath();
+            ctx.fillStyle = (beatIndex === 0) ? currentActiveColor : inactiveColor; // 右侧是当前拍的颜色 (如果当前是0，右侧是0)
+            ctx.fill();
+
+            // 绘制右侧活动光晕 (如果当前是活动的 beatIndex === 1)
+            if (beatIndex === 1) { // 如果是第二拍，则右侧激活
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, outerRadius, -Math.PI * 0.5, Math.PI * 0.5);
+                ctx.arc(centerX, centerY, innerRadius, Math.PI * 0.5, -Math.PI * 0.5, true);
+                ctx.closePath();
+                ctx.fillStyle = currentActiveColor;
+                ctx.filter = `blur(${outerRadius * 0.15}px)`;
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.fill();
+                ctx.filter = 'none';
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            ctx.restore();
         }
+
 
         // --- 4. 节拍器逻辑 ---
-
-        // 每次节拍跳动时执行的函数
         function tick() {
-            // 根据状态播放不同的音高
-            if (isRedFirst) {
-                playSound(880); // 播放高音 "tick"
+            // 每组的第一拍为重音（更高音高），第二拍为弱音
+            playSound(beatInMeasure === 0 ? 880 : 440);
+            
+            // 根据节拍索引绘制循环颜色的两个半圆
+            // 这里我们希望 beatIndex === 0 时右侧亮，beatIndex === 1 时左侧亮
+            // 所以将当前的 beatInMeasure 直接传给绘图函数
+            drawTwoHalves(beatInMeasure);
+
+            // 移动到下一个节拍 (0, 1, 0, 1...)
+            beatInMeasure = (beatInMeasure + 1) % BEATS_PER_MEASURE;
+        }
+
+        function toggleMetronome() {
+            if (isPlaying) {
+                stopMetronome();
             } else {
-                playSound(440); // 播放低音 "tock"
+                startMetronome();
             }
-            isRedFirst = !isRedFirst; // 切换颜色状态
-            draw(); // 重绘Canvas
         }
 
         function startMetronome() {
-            initAudio(); // 在用户点击开始时初始化音频
-            stopMetronome(); // 先停止任何正在运行的定时器
-
-            const bpm = parseInt(bpmInput.value);
-            if (isNaN(bpm) || bpm <= 0) {
-                console.error("无效的BPM数值");
-                return;
-            }
-
-            const intervalMilliseconds = (60 / bpm) * 1000;
+            initAudio();
+            isPlaying = true;
+            playIcon.style.display = 'none';
+            pauseIcon.style.display = 'block';
             
-            // 立即执行一次 tick，避免启动时的延迟感
-            tick(); 
-            // 然后设置定时器以进行后续的节拍
+            beatInMeasure = 0; // 每次都从第一拍开始，对应右半圆亮
+            const intervalMilliseconds = (60 / currentBpm) * 1000;
+            tick(); // 立即触发第一次节拍
             intervalId = setInterval(tick, intervalMilliseconds);
-            
-            startBtn.disabled = true; // 运行时禁用开始按钮
-            stopBtn.disabled = false;
         }
 
         function stopMetronome() {
             clearInterval(intervalId);
             intervalId = null;
-            startBtn.disabled = false; // 停止后启用开始按钮
-            stopBtn.disabled = true;
+            isPlaying = false;
+            playIcon.style.display = 'block';
+            pauseIcon.style.display = 'none';
+            beatInMeasure = 0;
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // 停止时清空画布
+        }
+
+        function updateBpm(newBpm) {
+            currentBpm = Math.max(20, Math.min(300, newBpm));
+            bpmDisplay.textContent = currentBpm;
+            if (isPlaying) {
+                stopMetronome();
+                startMetronome();
+            }
         }
 
         // --- 5. 事件监听 ---
-        startBtn.addEventListener('click', startMetronome);
-        stopBtn.addEventListener('click', stopMetronome);
-        
-        // 监听窗口大小变化
+        bpmMinusBtn.addEventListener('click', () => updateBpm(currentBpm - 1));
+        bpmPlusBtn.addEventListener('click', () => updateBpm(currentBpm + 1));
+        playPauseBtn.addEventListener('click', toggleMetronome);
+        volumeSlider.addEventListener('input', () => {
+            if (masterGainNode) {
+                masterGainNode.gain.setTargetAtTime(parseFloat(volumeSlider.value), audioContext.currentTime, 0.01);
+            }
+        });
         window.addEventListener('resize', resizeCanvas);
 
         // --- 6. 初始加载 ---
         function initialize() {
-            stopBtn.disabled = true; // 初始禁用停止按钮
-            resizeCanvas(); // 首次加载时调整canvas尺寸并绘制
+            bpmDisplay.textContent = currentBpm;
+            resizeCanvas();
+            // 初始时确保 Canvas 是清空的，不显示任何颜色
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
         }
-        
         initialize();
     </script>
 </body>
