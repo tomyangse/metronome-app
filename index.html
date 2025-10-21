@@ -456,8 +456,35 @@
         }
 
         // --- 5. 事件监听 ---
-        bpmMinusBtn.addEventListener('click', () => updateBpm(currentBpm - 1));
-        bpmPlusBtn.addEventListener('click', () => updateBpm(currentBpm + 1));
+        let bpmChangeTimeout = null;
+        let bpmChangeInterval = null;
+
+        const startChangingBpm = (direction) => {
+            // 第一次按下时，变化10
+            updateBpm(currentBpm + 10 * direction);
+
+            // 短暂延迟后，开始以1为单位持续变化
+            bpmChangeTimeout = setTimeout(() => {
+                bpmChangeInterval = setInterval(() => {
+                    updateBpm(currentBpm + 1 * direction);
+                }, 100); // 每100毫秒变化一次
+            }, 500); // 500毫秒后启动
+        };
+
+        const stopChangingBpm = () => {
+            clearTimeout(bpmChangeTimeout);
+            clearInterval(bpmChangeInterval);
+        };
+
+        bpmPlusBtn.addEventListener('mousedown', () => startChangingBpm(1));
+        bpmMinusBtn.addEventListener('mousedown', () => startChangingBpm(-1));
+        
+        // 当鼠标松开或移出按钮时，停止变化
+        ['mouseup', 'mouseleave'].forEach(event => {
+            bpmPlusBtn.addEventListener(event, stopChangingBpm);
+            bpmMinusBtn.addEventListener(event, stopChangingBpm);
+        });
+
         playPauseBtn.addEventListener('click', toggleMetronome);
         volumeSlider.addEventListener('input', () => {
             if (masterGainNode) {
