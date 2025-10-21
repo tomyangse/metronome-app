@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网页节拍器 (Canvas版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* 自定义输入框的箭头按钮样式 */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl text-center">
+        <h1 class="text-4xl font-bold text-gray-800 mb-4">Canvas 节拍器</h1>
+        <p class="text-gray-600 mb-8">设置每分钟节拍数 (BPM)，然后点击开始。</p>
+        
+        <!-- Canvas 元素 -->
+        <div class="bg-white rounded-lg shadow-lg mb-8 aspect-video overflow-hidden">
+            <canvas id="metronome-canvas"></canvas>
+        </div>
+
+        <!-- 控制区域 -->
+        <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col sm:flex-row items-center justify-center gap-4">
+            <label for="bpm-input" class="text-lg font-medium text-gray-700">频率 (BPM):</label>
+            <input type="number" id="bpm-input" value="100" min="1" max="300" class="w-24 text-center text-lg p-2 border-2 border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+            <button id="start-btn" class="w-full sm:w-auto bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">开始</button>
+            <button id="stop-btn" class="w-full sm:w-auto bg-red-600 text-white font-bold py-2 px-6 rounded-md hover:bg-red-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">停止</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. 初始化和获取元素 ---
+        const canvas = document.getElementById('metronome-canvas');
+        const ctx = canvas.getContext('2d');
+
+        const bpmInput = document.getElementById('bpm-input');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        
+        // --- 2. 状态变量 ---
+        let intervalId = null; // 用于存储定时器ID
+        let isRedFirst = true; // 跟踪颜色状态, true表示左红右蓝
+        const COLOR_1 = '#ef4444'; // 红色 (Tailwind red-500)
+        const COLOR_2 = '#3b82f6'; // 蓝色 (Tailwind blue-500)
+
+        // --- 2.5. 音频 ---
+        let audioContext = null;
+
+        // 初始化音频上下文（必须由用户操作触发）
+        function initAudio() {
+            if (!audioContext) {
+                // 兼容旧版浏览器
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            // 如果音频上下文处于暂停状态（某些浏览器会自动暂停），则恢复它
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        // 播放声音的函数
+        function playSound(frequency = 880, duration = 0.1) {
+            if (!audioContext) return;
+            const now = audioContext.currentTime;
+
+            // 创建一个振荡器来生成声波
+            const oscillator = audioContext.createOscillator();
+            oscillator.type = 'sine'; // 正弦波听起来比较柔和
+            oscillator.frequency.setValueAtTime(frequency, now);
+
+            // 创建一个增益节点来控制音量包络（实现“滴答”声）
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01); // 快速起音
+            gainNode.gain.linearRampToValueAtTime(0, now + duration); // 快速衰减
+
+            // 连接节点: 振荡器 -> 增益 -> 输出设备 (扬声器)
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // 启动和停止振荡器，播放完后自动清理
+            oscillator.start(now);
+            oscillator.stop(now + duration);
+        }
+
+        // --- 3. Canvas 绘图函数 ---
+        
+        // 调整Canvas尺寸以匹配其容器，并保持高清
+        function resizeCanvas() {
+            const parent = canvas.parentElement;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = parent.clientWidth * dpr;
+            canvas.height = parent.clientHeight * dpr;
+            canvas.style.width = `${parent.clientWidth}px`;
+            canvas.style.height = `${parent.clientHeight}px`;
+            ctx.scale(dpr, dpr); // 缩放画布以适应高DPI屏幕
+            draw(); // 尺寸变化后重绘
+        }
+        
+        // 核心绘图函数
+        function draw() {
+            // 获取当前的画布尺寸 (使用 style 的尺寸)
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            
+            // 清除整个画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 计算方块的尺寸和位置
+            const boxSize = Math.min(width, height) * 0.4; // 方块尺寸为画布短边的40%
+            const gap = width * 0.05; // 间隙为画布宽度的5%
+            const totalWidth = boxSize * 2 + gap; // 两个方块加间隙的总宽度
+
+            const startX = (width - totalWidth) / 2; // 计算起始X坐标以使其居中
+            const startY = (height - boxSize) / 2; // 计算起始Y坐标以使其居中
+
+            // 根据 isRedFirst 状态决定颜色
+            const firstColor = isRedFirst ? COLOR_1 : COLOR_2;
+            const secondColor = isRedFirst ? COLOR_2 : COLOR_1;
+            
+            // 绘制第一个方块
+            ctx.fillStyle = firstColor;
+            ctx.beginPath();
+            // 使用自定义的圆角矩形绘制函数
+            drawRoundedRect(startX, startY, boxSize, boxSize, 12);
+            ctx.fill();
+
+            // 绘制第二个方块
+            ctx.fillStyle = secondColor;
+            ctx.beginPath();
+            drawRoundedRect(startX + boxSize + gap, startY, boxSize, boxSize, 12);
+            ctx.fill();
+        }
+
+        // 辅助函数：绘制圆角矩形
+        function drawRoundedRect(x, y, width, height, radius) {
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        // --- 4. 节拍器逻辑 ---
+
+        // 每次节拍跳动时执行的函数
+        function tick() {
+            // 根据状态播放不同的音高
+            if (isRedFirst) {
+                playSound(880); // 播放高音 "tick"
+            } else {
+                playSound(440); // 播放低音 "tock"
+            }
+            isRedFirst = !isRedFirst; // 切换颜色状态
+            draw(); // 重绘Canvas
+        }
+
+        function startMetronome() {
+            initAudio(); // 在用户点击开始时初始化音频
+            stopMetronome(); // 先停止任何正在运行的定时器
+
+            const bpm = parseInt(bpmInput.value);
+            if (isNaN(bpm) || bpm <= 0) {
+                console.error("无效的BPM数值");
+                return;
+            }
+
+            const intervalMilliseconds = (60 / bpm) * 1000;
+            
+            // 立即执行一次 tick，避免启动时的延迟感
+            tick(); 
+            // 然后设置定时器以进行后续的节拍
+            intervalId = setInterval(tick, intervalMilliseconds);
+            
+            startBtn.disabled = true; // 运行时禁用开始按钮
+            stopBtn.disabled = false;
+        }
+
+        function stopMetronome() {
+            clearInterval(intervalId);
+            intervalId = null;
+            startBtn.disabled = false; // 停止后启用开始按钮
+            stopBtn.disabled = true;
+        }
+
+        // --- 5. 事件监听 ---
+        startBtn.addEventListener('click', startMetronome);
+        stopBtn.addEventListener('click', stopMetronome);
+        
+        // 监听窗口大小变化
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- 6. 初始加载 ---
+        function initialize() {
+            stopBtn.disabled = true; // 初始禁用停止按钮
+            resizeCanvas(); // 首次加载时调整canvas尺寸并绘制
+        }
+        
+        initialize();
+    </script>
+</body>
+</html>
+
