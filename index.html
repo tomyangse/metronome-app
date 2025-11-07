@@ -36,9 +36,10 @@
             grid-template-areas:
                 "bpm-control . volume-slider-container"
                 "circular-control-area circular-control-area volume-slider-container"
-                "bottom-icons . volume-slider-container";
+                "bottom-icons . volume-slider-container"
+                "timer-control timer-control timer-control"; /* 定时器行 */
             grid-template-columns: 1fr auto 1fr;
-            grid-template-rows: auto 1fr auto;
+            grid-template-rows: auto 1fr auto auto; /* 自动调整行高 */
             gap: 25px 15px;
             align-items: center;
             justify-items: center;
@@ -58,7 +59,7 @@
             align-items: center;
             justify-content: center;
             gap: 20px;
-            grid-column: 1 / -1; /* 让BPM控制横跨所有列 */
+            grid-column: 1 / -1; 
             grid-area: bpm-control;
         }
 
@@ -75,10 +76,14 @@
             cursor: pointer;
             transition: all 0.2s ease-in-out;
         }
-        .bpm-button:active {
+        .bpm-button:active, .bpm-button:disabled {
             box-shadow: inset 2px 2px 5px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
             color: var(--primary-color-end);
         }
+         .bpm-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+         }
 
         .bpm-value {
             font-size: 48px;
@@ -107,7 +112,7 @@
             width: 100%;
             height: 100%;
             border-radius: 50%;
-            transform: scale(0.9); /* 调整 Canvas 缩放，使其填充整个圆环内部 */
+            transform: scale(0.9);
         }
 
         .play-pause-button {
@@ -220,6 +225,25 @@
             box-shadow: 3px 3px 8px var(--shadow-dark), -3px -3px 8px var(--shadow-light);
             border: none;
         }
+
+        /* --- 定时器控制 --- */
+        .timer-control {
+            grid-area: timer-control;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            width: 100%;
+        }
+
+        .timer-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            width: 90px;
+            text-align: center;
+        }
+
     </style>
 </head>
 <body>
@@ -253,27 +277,57 @@
         <div class="volume-slider-container">
             <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.5" orient="vertical">
         </div>
+
+        <!-- 定时器模块 (移除了播放按钮) -->
+        <div class="timer-control">
+            <button id="timer-minus-btn" class="bpm-button">-</button>
+            <span id="timer-display" class="timer-value">0 min</span>
+            <button id="timer-plus-btn" class="bpm-button">+</button>
+        </div>
     </div>
 
     <script>
-        // --- 1. 初始化和获取元素 ---
-        const canvas = document.getElementById('metronome-canvas');
+      window.addEventListener('load', () => {
+        
+        // --- 1. 初始化和获取元素 (附带空值检查) ---
+        function getEl(id) {
+            const el = document.getElementById(id);
+            if (!el) {
+                console.error("Fatal Error: Cannot find element with ID '" + id + "'");
+            }
+            return el;
+        }
+
+        const canvas = getEl('metronome-canvas');
         const ctx = canvas.getContext('2d');
 
-        const bpmMinusBtn = document.getElementById('bpm-minus');
-        const bpmPlusBtn = document.getElementById('bpm-plus');
-        const bpmDisplay = document.getElementById('bpm-display');
-        const playPauseBtn = document.getElementById('play-pause-btn');
-        const playIcon = document.getElementById('play-icon');
-        const pauseIcon = document.getElementById('pause-icon');
-        const volumeSlider = document.getElementById('volume-slider');
+        const bpmMinusBtn = getEl('bpm-minus');
+        const bpmPlusBtn = getEl('bpm-plus');
+        const bpmDisplay = getEl('bpm-display');
+        const playPauseBtn = getEl('play-pause-btn');
+        const playIcon = getEl('play-icon');
+        const pauseIcon = getEl('pause-icon');
+        const volumeSlider = getEl('volume-slider');
+
+        // 定时器元素
+        const timerMinusBtn = getEl('timer-minus-btn');
+        const timerPlusBtn = getEl('timer-plus-btn');
+        const timerDisplay = getEl('timer-display');
+        // (移除了 timerStartStopBtn, timerPlayIcon, timerPauseIcon)
 
         // --- 2. 状态变量 ---
         let intervalId = null;
-        let isPlaying = false;
+        let isPlaying = false; // 主播放状态
         let currentBpm = 100;
         let beatInMeasure = 0;
-        const BEATS_PER_MEASURE = 2; // 改为2拍循环
+        const BEATS_PER_MEASURE = 2;
+
+        // 定时器状态
+        let timerMinutes = 0;
+        let timerIntervalId = null;
+        let isTimerRunning = false; // 定时器独立运行状态
+        let timerEndTime = 0;
+        let totalTimerSeconds = 0;
 
         // --- 2.5. 音频 ---
         let audioContext = null;
@@ -281,12 +335,18 @@
 
         function initAudio() {
             if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                masterGainNode = audioContext.createGain();
-                masterGainNode.connect(audioContext.destination);
-                masterGainNode.gain.setValueAtTime(parseFloat(volumeSlider.value), audioContext.currentTime);
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    masterGainNode = audioContext.createGain();
+                    masterGainNode.connect(audioContext.destination);
+                    if(volumeSlider) {
+                        masterGainNode.gain.setValueAtTime(parseFloat(volumeSlider.value), audioContext.currentTime);
+                    }
+                } catch (e) {
+                    console.error("Web Audio API is not supported in this browser", e);
+                }
             }
-            if (audioContext.state === 'suspended') {
+            if (audioContext && audioContext.state === 'suspended') {
                 audioContext.resume();
             }
         }
@@ -313,79 +373,70 @@
         
         // --- 3. Canvas 绘图函数 ---
         function resizeCanvas() {
+            if (!canvas) return;
             const parent = canvas.parentElement;
+            if (!parent) return;
             const dpr = window.devicePixelRatio || 1;
             canvas.width = parent.clientWidth * dpr;
             canvas.height = parent.clientHeight * dpr;
             canvas.style.width = `${parent.clientWidth}px`;
             canvas.style.height = `${parent.clientHeight}px`;
             ctx.scale(dpr, dpr);
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // 调整大小时清空画布
-            // 重新绘制背景圆，确保调整大小后 Canvas 内容正确
-            drawTwoHalves(beatInMeasure); 
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (isPlaying) {
+                drawTwoHalves(beatInMeasure); 
+            }
         }
         
-        // 绘制填充圆环和光晕效果
         function drawTwoHalves(beatIndex) {
             const width = canvas.clientWidth;
             const height = canvas.clientHeight;
             const centerX = width / 2;
             const centerY = height / 2;
             const outerRadius = Math.min(width, height) / 2;
-            const innerRadius = outerRadius * 0.7; // 定义内圆半径，创建环形区域
+            const innerRadius = outerRadius * 0.7;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 获取 CSS 变量中的颜色
             const styles = getComputedStyle(document.documentElement);
             const activeColorLight = styles.getPropertyValue('--active-color-light').trim();
             const activeColorDark = styles.getPropertyValue('--active-color-dark').trim();
             const bgColor = styles.getPropertyValue('--bg-color').trim();
 
-            // 根据 beatIndex 决定当前活动的颜色
             const currentActiveColor = beatIndex === 0 ? activeColorLight : activeColorDark;
-            const inactiveColor = bgColor; // 非活动区域使用背景色
+            const inactiveColor = bgColor;
 
             // --- 绘制左半部分 ---
-            ctx.save(); // 保存当前 Canvas 状态
-            
-            // 绘制左侧背景圆 (非活动色)
+            ctx.save();
             ctx.beginPath();
-            ctx.arc(centerX, centerY, outerRadius, Math.PI * 0.5, Math.PI * 1.5); // 从9点到3点
-            ctx.arc(centerX, centerY, innerRadius, Math.PI * 1.5, Math.PI * 0.5, true); // 从3点到9点，逆时针
+            ctx.arc(centerX, centerY, outerRadius, Math.PI * 0.5, Math.PI * 1.5);
+            ctx.arc(centerX, centerY, innerRadius, Math.PI * 1.5, Math.PI * 0.5, true);
             ctx.closePath();
-            ctx.fillStyle = (beatIndex === 1) ? currentActiveColor : inactiveColor; // 左侧是下一拍的颜色 (如果当前是0，下一拍是1)
+            ctx.fillStyle = (beatIndex === 1) ? currentActiveColor : inactiveColor; 
             ctx.fill();
-
-            // 绘制左侧活动光晕 (如果当前是活动的 beatIndex === 0)
             if (beatIndex === 0) {
                 ctx.beginPath();
                 ctx.arc(centerX, centerY, outerRadius, Math.PI * 0.5, Math.PI * 1.5);
                 ctx.arc(centerX, centerY, innerRadius, Math.PI * 1.5, Math.PI * 0.5, true);
                 ctx.closePath();
                 ctx.fillStyle = currentActiveColor;
-                ctx.filter = `blur(${outerRadius * 0.15}px)`; // 模糊效果
-                ctx.globalCompositeOperation = 'lighter'; // 叠加发光
+                ctx.filter = `blur(${outerRadius * 0.15}px)`; 
+                ctx.globalCompositeOperation = 'lighter'; 
                 ctx.fill();
-                ctx.filter = 'none'; // 重置 filter
-                ctx.globalCompositeOperation = 'source-over'; // 重置混合模式
+                ctx.filter = 'none'; 
+                ctx.globalCompositeOperation = 'source-over'; 
             }
-
-            ctx.restore(); // 恢复之前保存的 Canvas 状态
+            ctx.restore(); 
 
             // --- 绘制右半部分 ---
             ctx.save();
-            
-            // 绘制右侧背景圆 (非活动色)
             ctx.beginPath();
-            ctx.arc(centerX, centerY, outerRadius, -Math.PI * 0.5, Math.PI * 0.5); // 从3点到9点
-            ctx.arc(centerX, centerY, innerRadius, Math.PI * 0.5, -Math.PI * 0.5, true); // 从9点到3点，逆时针
+            ctx.arc(centerX, centerY, outerRadius, -Math.PI * 0.5, Math.PI * 0.5);
+            ctx.arc(centerX, centerY, innerRadius, Math.PI * 0.5, -Math.PI * 0.5, true);
             ctx.closePath();
-            ctx.fillStyle = (beatIndex === 0) ? currentActiveColor : inactiveColor; // 右侧是当前拍的颜色 (如果当前是0，右侧是0)
+            ctx.fillStyle = (beatIndex === 0) ? currentActiveColor : inactiveColor; 
             ctx.fill();
-
-            // 绘制右侧活动光晕 (如果当前是活动的 beatIndex === 1)
-            if (beatIndex === 1) { // 如果是第二拍，则右侧激活
+            if (beatIndex === 1) {
                 ctx.beginPath();
                 ctx.arc(centerX, centerY, outerRadius, -Math.PI * 0.5, Math.PI * 0.5);
                 ctx.arc(centerX, centerY, innerRadius, Math.PI * 0.5, -Math.PI * 0.5, true);
@@ -397,78 +448,156 @@
                 ctx.filter = 'none';
                 ctx.globalCompositeOperation = 'source-over';
             }
-
             ctx.restore();
         }
 
-
         // --- 4. 节拍器逻辑 ---
         function tick() {
-            // 每组的第一拍为重音（更高音高），第二拍为弱音
             playSound(beatInMeasure === 0 ? 880 : 440);
-            
-            // 根据节拍索引绘制循环颜色的两个半圆
-            // 这里我们希望 beatIndex === 0 时右侧亮，beatIndex === 1 时左侧亮
-            // 所以将当前的 beatInMeasure 直接传给绘图函数
             drawTwoHalves(beatInMeasure);
-
-            // 移动到下一个节拍 (0, 1, 0, 1...)
             beatInMeasure = (beatInMeasure + 1) % BEATS_PER_MEASURE;
         }
 
-        function toggleMetronome() {
-            if (isPlaying) {
-                stopMetronome();
+        // --- 5. 定时器逻辑 (修改) ---
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function updateTimerDisplay() {
+            if (isTimerRunning) {
+                const remainingSeconds = Math.max(0, Math.round((timerEndTime - Date.now()) / 1000));
+                timerDisplay.textContent = formatTime(remainingSeconds);
             } else {
-                startMetronome();
+                timerDisplay.textContent = `${timerMinutes} min`;
             }
         }
 
-        function startMetronome() {
-            initAudio();
-            isPlaying = true;
-            playIcon.style.display = 'none';
-            pauseIcon.style.display = 'block';
-            
-            beatInMeasure = 0; // 每次都从第一拍开始，对应右半圆亮
-            const intervalMilliseconds = (60 / currentBpm) * 1000;
-            tick(); // 立即触发第一次节拍
-            intervalId = setInterval(tick, intervalMilliseconds);
+        function updateTimerValue(change) {
+            if (isTimerRunning || isPlaying) return; // 运行时或节拍器播放时不允许修改时间
+            timerMinutes += change;
+            if (timerMinutes < 0) timerMinutes = 0;
+            if (timerMinutes > 100) timerMinutes = 100;
+            updateTimerDisplay();
         }
 
-        function stopMetronome() {
-            clearInterval(intervalId);
-            intervalId = null;
-            isPlaying = false;
-            playIcon.style.display = 'block';
-            pauseIcon.style.display = 'none';
-            beatInMeasure = 0;
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // 停止时清空画布
+        function timerTick() {
+            const remainingSeconds = (timerEndTime - Date.now()) / 1000;
+            
+            if (remainingSeconds <= 0) {
+                // 定时器结束，停止所有
+                toggleMasterPlay(); // 调用主停止函数
+                playSound(1200, 0.5); // 播放提示音
+            } else {
+                updateTimerDisplay();
+            }
         }
+
+        function startTimer() {
+            if (timerMinutes === 0 || isTimerRunning) return; 
+            
+            isTimerRunning = true;
+            totalTimerSeconds = timerMinutes * 60;
+            // 修复：确保 timerEndTime 是基于当前时间设置的
+            timerEndTime = Date.now() + totalTimerSeconds * 1000;
+            
+            timerMinusBtn.disabled = true;
+            timerPlusBtn.disabled = true;
+
+            timerTick(); // 立即更新一次显示
+            timerIntervalId = setInterval(timerTick, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerIntervalId);
+            timerIntervalId = null;
+            isTimerRunning = false;
+
+            timerMinusBtn.disabled = false;
+            timerPlusBtn.disabled = false;
+
+            // 暂停时，不重置为 "X min"，而是保持当前倒计时
+            // updateTimerDisplay(); 
+        }
+
+        // --- 6. 主控制逻辑 (合并) ---
+        function toggleMasterPlay() {
+            if (isPlaying) {
+                // --- 停止逻辑 ---
+                clearInterval(intervalId);
+                intervalId = null;
+                isPlaying = false;
+                playIcon.style.display = 'block';
+                pauseIcon.style.display = 'none';
+                beatInMeasure = 0;
+                if (ctx) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height); 
+                }
+
+                // 停止定时器 (暂停)
+                if (isTimerRunning) {
+                    stopTimer();
+                    // 记录剩余时间
+                    totalTimerSeconds = Math.max(0, Math.round((timerEndTime - Date.now()) / 1000));
+                    timerMinutes = Math.ceil(totalTimerSeconds / 60); // 更新分钟数以便下次启动
+                }
+                
+                timerMinusBtn.disabled = false;
+                timerPlusBtn.disabled = false;
+                
+            } else {
+                // --- 启动逻辑 ---
+                initAudio();
+                if (!audioContext) return;
+                isPlaying = true;
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                
+                // 启动节拍器
+                beatInMeasure = 0; 
+                const intervalMilliseconds = (60 / currentBpm) * 1000;
+                tick(); 
+                intervalId = setInterval(tick, intervalMilliseconds);
+
+                // 启动定时器 (如果设置了)
+                if (timerMinutes > 0) {
+                    startTimer();
+                }
+                
+                timerMinusBtn.disabled = true;
+                timerPlusBtn.disabled = true;
+            }
+        }
+
 
         function updateBpm(newBpm) {
             currentBpm = Math.max(20, Math.min(300, newBpm));
             bpmDisplay.textContent = currentBpm;
             if (isPlaying) {
-                stopMetronome();
-                startMetronome();
+                // 如果正在播放，动态更新间隔
+                clearInterval(intervalId);
+                const intervalMilliseconds = (60 / currentBpm) * 1000;
+                intervalId = setInterval(tick, intervalMilliseconds);
             }
         }
 
-        // --- 5. 事件监听 ---
+        // --- 7. 事件监听 ---
+        if (!bpmMinusBtn || !bpmPlusBtn || !playPauseBtn || !volumeSlider || !timerMinusBtn || !timerPlusBtn) {
+            console.error("Fatal Error: One or more UI elements failed to load. Script execution halted.");
+            return;
+        }
+
         let bpmChangeTimeout = null;
         let bpmChangeInterval = null;
 
         const startChangingBpm = (direction) => {
-            // 第一次按下时，变化10
             updateBpm(currentBpm + 10 * direction);
-
-            // 短暂延迟后，开始以1为单位持续变化
             bpmChangeTimeout = setTimeout(() => {
                 bpmChangeInterval = setInterval(() => {
                     updateBpm(currentBpm + 1 * direction);
-                }, 100); // 每100毫秒变化一次
-            }, 500); // 500毫秒后启动
+                }, 100); 
+            }, 500); 
         };
 
         const stopChangingBpm = () => {
@@ -479,29 +608,40 @@
         bpmPlusBtn.addEventListener('mousedown', () => startChangingBpm(1));
         bpmMinusBtn.addEventListener('mousedown', () => startChangingBpm(-1));
         
-        // 当鼠标松开或移出按钮时，停止变化
-        ['mouseup', 'mouseleave'].forEach(event => {
+        bpmPlusBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startChangingBpm(1); });
+        bpmMinusBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startChangingBpm(-1); });
+
+        ['mouseup', 'mouseleave', 'touchend'].forEach(event => {
             bpmPlusBtn.addEventListener(event, stopChangingBpm);
             bpmMinusBtn.addEventListener(event, stopChangingBpm);
         });
+        
+        // 定时器按钮监听
+        timerMinusBtn.addEventListener('click', () => updateTimerValue(-1));
+        timerPlusBtn.addEventListener('click', () => updateTimerValue(1));
 
-        playPauseBtn.addEventListener('click', toggleMetronome);
+        // 主播放按钮
+        playPauseBtn.addEventListener('click', toggleMasterPlay);
+        
         volumeSlider.addEventListener('input', () => {
             if (masterGainNode) {
                 masterGainNode.gain.setTargetAtTime(parseFloat(volumeSlider.value), audioContext.currentTime, 0.01);
             }
         });
+        
         window.addEventListener('resize', resizeCanvas);
 
-        // --- 6. 初始加载 ---
+        // --- 8. 初始加载 ---
         function initialize() {
-            bpmDisplay.textContent = currentBpm;
+            if(bpmDisplay) bpmDisplay.textContent = currentBpm;
+            if(timerDisplay) updateTimerDisplay();
             resizeCanvas();
-            // 初始时确保 Canvas 是清空的，不显示任何颜色
-            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            if(ctx) ctx.clearRect(0, 0, canvas.width, canvas.height); 
         }
+        
         initialize();
+
+      }); // 结束 'load' 事件
     </script>
 </body>
 </html>
-
